@@ -16,7 +16,7 @@ This project explores patterns of polio incidence in the United States between 1
 
 ## Repository Structure
 - `paper/` – Final paper (PDF)
-- `analysis` - Markdown containing the analysis and plotting code in R 
+- `analysis/` - Markdown containing the analysis and plotting code in R 
 - `data/` – Raw data (Tycho and FRED) and derived CSVs 
 - `results/` – Key figures generated for the paper  
 
