@@ -15,19 +15,21 @@ This project explores patterns of polio incidence in the United States between 1
 ---
 
 ## Repository Structure
-- `paper/` – Final paper (PDF or preprint)  
-- `notebooks/` – Jupyter notebooks with analysis steps  
-- `scripts/` – Helper functions in Python/R  
-- `data/` – Placeholder for raw/processed data (not included here)  
-- `figures/` – Key figures generated for the paper  
+- `paper/` – Final paper (PDF)
+- `analysis` - Markdown containing the analysis and plotting code in R 
+- `data/` – Raw data (Tycho and FRED) and derived CSVs 
+- `results/` – Key figures generated for the paper  
 
 ---
 
 ## Data Availability
-The original data is not included in this repository.  
+The original Tycho data is not included in this repository.  
 To run the analyses, please refer to:  
 - [Tycho Project Data](https://www.tycho.pitt.edu/) (historical infectious disease incidence)  
-- U.S. Census socioeconomic indicators (various years)
+
+The original economic data, as accessed and downloaded for this project (including our specific filters) is included in `data/raw/fred_income`. 
+Further US economic data can be accessed at:
+- [Per Capita Personal Income by State, Annual](https://fred.stlouisfed.org/release/tables?rid=110&eid=257197#snid=257202)
 
 ---
 
