@@ -11,6 +11,7 @@ Please download it directly from Project Tycho and place it in the `data/raw/` d
 
 This project also uses FRED (Federal Reserve Bank of St. Louis) data on income statistics in the United States. 
 
-File: `fred_income.csv`
+- Source: [Per Capita Personal Income by State, Annual](https://fred.stlouisfed.org/release/tables?rid=110&eid=257197#snid=257202)
+- File: `fred_income.csv`
 
 The processed/filtered datasets in `data/derived_CSVs/` are generated from the raw data and included here for reproducibility.
