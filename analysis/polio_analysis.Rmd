@@ -1,0 +1,445 @@
+---
+title: "Polio in the United States: Incidence, Income, and Vaccine Impact (1928-1970)"
+author: "Wilbroda Onyango, Beverly Odhiambo"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Libraries
+library(dplyr)
+library(readr)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(plotly)
+library(usmap)
+library(sf)
+library(usdata)
+library(gganimate)
+library(shadowtext)
+library(gifski)
+library(png)
+library(magick)
+```
+
+## R Markdown
+
+1. Load and filter Tycho data 
+
+```{r}
+# Load dataset (place file in data/raw/)
+tycho <- read.csv("data/raw/Project_Tycho_Level1.csv")
+
+# Keep only Polio cases
+polio_data <- subset(tycho, disease == "POLIO")
+
+rownames(polio_data) <- NULL
+```
+
+2. Transform epidemiological week to calendar date. 
+
+```{r}
+polio_data$epi_week <- as.numeric(polio_data$epi_week)
+
+polio_data$epi_week_date <- as.Date(
+  paste0(substr(polio_data$epi_week, 1, 4), "-01-01"), format="%Y-%m-%d") + as.numeric(substr(polio_data$epi_week, 5, 6)) * 7 - 1
+
+polio_data$epi_week_date_dmy <- format(polio_data$epi_week_date, "%d-%m-%Y")
+
+# Save cleaned dataset for reproducibility
+write.csv(polio_data, "data/derived_CSVs/polio_transformed_date.csv", row.names = FALSE)
+```
+
+3. Use the state column to generate a list of the state codes. 
+
+```{r}
+polio_transformed_date <- read.csv("data/derived_CSVs/polio_transformed_date.csv")
+
+# Extract the unique values of the state column
+states <- unique(polio_transformed_date$state)
+
+state_list <- paste(states, collapse = ", ")
+
+# Do the same for the state names
+state_names <- unique(polio_transformed_date$loc)
+
+names_list <- paste(state_names, collapse = ", ")
+
+polio_transformed_date <- polio_transformed_date %>% select(-epi_week_date)
+
+# Update the data-transformed csv file
+write.csv(polio_transformed_date, "data/derived_CSVs/polio_transformed_date.csv", row.names = FALSE)
+```
+
+4. Handle the missing values in the 'cases' column
+
+```{r}
+# Import the dataset with the following settings:
+
+state_polio_data <- read_csv("data/derived_CSVs/polio_transformed_date.csv", na = "\\N",
+    col_types = cols(epi_week = col_integer(), 
+        state = col_factor(levels = c("PA", 
+            "GA", "IN", "ME", "NE", "WV", 
+            "MN", "CA", "NC", "NY", "WI", 
+            "SC", "MI", "OR", "NM", "FL", 
+            "NJ", "LA", "WY", "MT", "CT", 
+            "KS", "OH", "TN", "OK", "MA", 
+            "AR", "CO", "IA", "KY", "AL", 
+            "RI", "DE", "ID", "UT", "MS", 
+            "WA", "TX", "IL", "SD", "MD", 
+            "VT", "AZ", "MO", "ND", "DC", 
+            "NH", "VA", "NV", "HI", "AK")), 
+        loc = col_factor(levels = c("PENNSYLVANIA", 
+            "GEORGIA", "INDIANA", "MAINE", 
+            "NEBRASKA", "WEST VIRGINIA", 
+            "MINNESOTA", "CALIFORNIA", "NORTH CAROLINA", 
+            "NEW YORK", "WISCONSIN", "SOUTH CAROLINA", 
+            "MICHIGAN", "OREGON", "NEW MEXICO", 
+            "FLORIDA", "NEW JERSEY", "LOUISIANA", 
+            "WYOMING", "MONTANA", "CONNECTICUT", 
+            "KANSAS", "OHIO", "TENNESSEE", 
+            "OKLAHOMA", "MASSACHUSETTS", 
+            "ARKANSAS", "COLORADO", "IOWA", 
+            "KENTUCKY", "ALABAMA", "RHODE ISLAND", 
+            "DELAWARE", "IDAHO", "UTAH", 
+            "MISSISSIPPI", "WASHINGTON", 
+            "TEXAS", "ILLINOIS", "SOUTH DAKOTA", 
+            "MARYLAND", "VERMONT", "ARIZONA", 
+            "MISSOURI", "NORTH DAKOTA", "DISTRICT OF COLUMBIA", 
+            "NEW HAMPSHIRE", "VIRGINIA", 
+            "NEVADA", "HAWAII", "ALASKA")), 
+        loc_type = col_skip(), disease = col_skip(), 
+        cases = col_integer(), incidence_per_100000 = col_double(), 
+        epi_week_date_dmy = col_date(format = "%d-%m-%Y")))
+
+# Save this for future reference
+write.csv(state_polio_data, "data/derived_CSVs/state_polio_data.csv", row.names = FALSE)
+```
+
+5. Process the data to allow for annual comparisons across states. 
+
+```{r}
+# Convert epidemiological week to years. 
+annual <- state_polio_data %>% mutate(year = epi_week %/% 100)
+```
+
+All analyses going forward will be conducted on twelve states, representing different income levels between the 1920s and 1970.
+
+Data from the Federal Reserve Bank of St. Louis shows the Per Capita Personal Income in the twelve states (Low income states: Alabama, Arkansas, Louisiana, South Carolina and Mississippi; and high income states: New York, New Jersey, District of Columbia, California, Pennsylvania, Washington and Illinois). The data ranges from 1929 to 1970.
+
+6. Load the Federal Reserve Bank of St. Louis (FRED) data for the income analysis.
+
+```{r}
+fred_income <- read.csv("data/raw/fred_income.csv")
+```
+
+7. Process the FRED data. 
+
+```{r}
+#Rename the columns
+fred_renamed <- fred_income %>% 
+  rename( Alabama = ALPCPI, Arkansas = ARPCPI, Mississippi = MSPCPI, 
+          South_Carolina = SCPCPI, Lousiana = LAPCPI, New_York = NYPCPI, 
+          California = CAPCPI, Illinois = ILPCPI, 
+          District_of_Columbia = DCPCPI, New_Jersey = NJPCPI, 
+          Pennsylvania = PAPCPI, Washington = WAPCPI
+    )
+
+# Convert from wide format to long format for ggplot2 use. 
+fred_long <- fred_renamed %>% 
+  pivot_longer(
+    cols = !observation_date, 
+    names_to = "State", 
+    values_to = "PCPI"
+  )
+
+# Extract only the years and save to a new column.
+
+fred_long$year <- format(as.Date(fred_long$observation_date), "%Y")
+```
+
+8. Plot a graph of income in per capita personal income (PCPI) for each of the representative states
+
+```{r}
+fred_long$year <- as.numeric(fred_long$year)
+
+PCPI <- ggplot(fred_long, aes(x=year, y=PCPI, color=State, group=State,
+                              text= paste("State:", State, "<br>Year:", year, 
+                                          "<br>Income:", PCPI))) + 
+  geom_line(size=1.2) + geom_point(size=2.0) + 
+  scale_y_continuous(breaks = seq(0, max(fred_long$PCPI, na.rm = TRUE), 
+                                  by=1000)) +
+  scale_x_continuous(breaks = seq(1930, 1970, by=5), limits = c(1929, 1970)) +
+    labs(
+    title = "Per Capita Personal Income by State (1929–1970)",
+    x = "Year",
+    y = "Income (USD)",
+    color = "State"
+  ) +
+  theme_minimal() + theme(plot.title = element_text(hjust = 0.5))
+
+ggplotly(PCPI, tooltip = "text")
+```
+
+9. Process the polio data
+
+```{r}
+# Aggregate epi_week data for each state into yearly data
+polio_yearly <- annual %>% 
+  group_by(loc, year) %>%
+  summarise(
+    total_cases = sum(cases, na.rm = TRUE), 
+    avg_incidence = mean(incidence_per_100000, na.rm = TRUE), 
+    .groups = "drop"
+    ) %>%
+  arrange(as.numeric(year), loc)
+
+# Aggregate state data to country data per year
+us_yearly <- annual %>%
+  group_by(year) %>%
+  summarise(
+    total_cases = sum(cases, na.rm = TRUE),
+    avg_incidence = mean(incidence_per_100000, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+```
+
+10. Plot a graph of annual polio cases in the US, showing the peak in 1952.
+
+```{r}
+us_yearly$year <- as.numeric(us_yearly$year)
+
+peak <- us_yearly %>% filter(total_cases == max(total_cases, na.rm = TRUE))
+
+annual_polio <- ggplot(us_yearly, aes(x=year, y=total_cases)) + 
+  geom_line(size=0.5) + geom_point(size=1.0) + 
+  geom_point(data = peak, aes(x=year, y=total_cases), 
+             color = "red", size = 4) +
+  scale_y_continuous(breaks = seq(0, max(us_yearly$total_cases, na.rm = TRUE), 
+                                  by=5000)) +
+  scale_x_continuous(breaks = seq(1930, 1970, by=5), limits = c(1928, 1968)) +
+  labs(
+    title = "Annual Polio Cases in the US (1928–1968)",
+    x = "Year",
+    y = "Total Cases") +
+  theme_minimal() + theme(plot.title = element_text(hjust = 0.5))
+
+ggplotly(annual_polio)
+```
+
+11. Process the polio data further. 
+
+```{r}
+# Rename loc to state
+polio_yearly <- polio_yearly %>% 
+  rename(state = loc)
+
+# Group the polio incidence numbers
+polio_yearly <- polio_yearly %>%
+  mutate(case_level = case_when(
+    total_cases == 0 ~ "0",
+    total_cases <= 500 ~ "1-500",
+    total_cases <= 2000 ~ "501-2000",
+    TRUE ~ ">2000"
+  ))
+```
+
+12. Create a choropleth map to visualise polio incidence , highlighting the states of interest
+
+```{r}
+# Set colours for the different groups
+case_colors <- c(
+  "0" = "grey90",
+  "1-500" = "lightblue",
+  "501-2000" = "orange",
+  ">2000" = "darkred"
+)
+
+# Plot 
+map_plot <- plot_usmap(
+  data = polio_yearly,
+  values = "case_level",
+  regions = "states"
+) +
+  scale_fill_manual(values = case_colors, name = "Total Cases") +
+  labs(
+    title = "Polio Incidence Across U.S. States",
+    subtitle = "Year: {closest_state}",
+    caption = "Source: Project Tycho"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "right") +
+  transition_states(year, transition_length = 0, state_length = 1)
+```
+
+13. Process the data for an animated map, using the usmap, usdata and sf packages
+
+```{r}
+target_states <- c(
+  "AL", "AR", "MS", "SC", "LA", "NY", "CA", "IL", "DC", "NJ", "PA", "WA"
+)
+
+#Convert state abbreviations to full state names
+full_names <- abbr2state(target_states)
+
+# Get the sf object of states polygons
+state_polygons <- us_map("states", include = full_names)
+
+# Compute centroids using sf functions to make sure the labels are centered.
+centroids <- st_centroid(state_polygons$geom)
+
+# Extract centroid coordinates as a dataframe
+centroid_coords <- do.call(rbind, st_geometry(centroids)) %>%
+  as.data.frame()
+
+# Combine centroid coordinates with state names and add abbreviation column to use as labels on the map
+label_data <- state_polygons %>%
+  st_set_geometry(NULL) %>%
+  select(full) %>%
+  bind_cols(centroid_coords) %>%
+  rename(long = V1, lat = V2) %>%
+  mutate(abbr = state2abbr(full))
+
+# Create factor for legend based on abbreviations (to generate legend)
+label_data$abbr_factor <- factor(label_data$abbr, levels = target_states)
+
+```
+
+14. Draw the animated map
+
+```{r}
+knitr::opts_chunk$set(dev = "ragg_png")
+
+# Build the map with abbreviated labels and legend of full names
+map_plot_labeled <- map_plot +
+  geom_text(
+    data = label_data,
+    aes(x = long, y = lat, label = abbr, color = abbr_factor),
+    size = 4,
+    fontface = "bold",
+    show.legend = TRUE
+  ) +
+  scale_color_manual(
+    name = "States",
+    values = setNames(rep("black", length(target_states)), target_states),
+    labels = full_names,
+    guide = guide_legend(override.aes = list(label = target_states))
+  ) +
+  theme(
+  legend.title = element_text(size = 14, face = "bold", family = "Times"),
+  legend.text = element_text(size = 12, face = "italic", family = "Times"),
+  plot.title = element_text(family = "Times", face = "bold", hjust = 0.5),
+  plot.subtitle = element_text(family = "Times", hjust = 0.5),
+  plot.caption = element_text(family = "Times")
+  ) +
+  labs(x = NULL, y = NULL)
+
+```
+
+
+```{r animate-interactive-only, eval=FALSE}
+animate(
+  map_plot_labeled,
+  width = 700,
+  height = 900,
+  fps = 2,
+  renderer = gifski_renderer()
+)
+```
+
+15. Save static images for 1954, 1955 and 1956
+
+```{r}
+
+for (target_year in c(1954, 1955, 1956)) {
+  
+  polio_year_subset <- polio_yearly %>% filter(year == target_year)
+  
+  map_static <- plot_usmap(
+    data = polio_year_subset,
+    values = "case_level",
+    regions = "states",
+    color = "grey60"
+  ) +
+    scale_fill_manual(values = case_colors, name = "Total Cases") +
+    labs(
+      title = "Polio Incidence Across U.S. States",
+      subtitle = paste("Year:", target_year),
+      caption = "Source: Project Tycho",
+      x = NULL,  
+      y = NULL
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      panel.background = element_rect(fill = "white", color = NA),
+      legend.position = "right",
+      legend.title = element_text(size = 14, face = "bold", family = "Times"),
+      legend.text = element_text(size = 12, face = "italic", family = "Times"),
+      plot.title = element_text(
+        family = "Times", face = "bold", size = 18, hjust = 0.5),
+      plot.subtitle = element_text(family = "Times", size = 14, hjust = 0.5),
+      plot.caption = element_text(family = "Times", size = 10, hjust = 1),
+      plot.margin = margin(20, 20, 20, 20)
+    )
+  
+map_static_labeled <- map_static +
+  geom_shadowtext(
+    data = label_data,
+    aes(x = long, y = lat, label = abbr),
+    color = "black",       
+    bg.color = NA,         
+    size = 3.2,            
+    fontface = "bold",
+    alpha = 1              
+  )
+
+  ggsave(
+    filename = paste0("polio_map_", target_year, ".png"),
+    plot = map_static_labeled,
+    width = 7,
+    height = 9,
+    dpi = 300,
+    bg = "white"  
+  )
+}
+
+```
+
+16. Plot a line graph of the total cases over time for all twelve states.
+
+```{r}
+# Extract the data for the twelve states of interest
+interest_states <- toupper(full_names)
+
+polio_interest <- polio_yearly %>%
+  filter(state %in% interest_states)
+
+# Plot
+polio_interest$year <- as.numeric(polio_interest$year)
+
+polio_11 <- ggplot(polio_interest, aes(
+  x=year, y=total_cases, color=state, group=state, text= paste(
+    "State:", state, "<br>Year:", year, "<br>Total Cases:", total_cases))) + 
+  geom_line(size=0.8) + geom_point(size=1.6) + 
+  scale_y_continuous(breaks = seq(0, max(polio_interest$total_cases, 
+                                         na.rm = TRUE), by=1000)) +
+  scale_x_continuous(breaks = seq(1950, 1960, by=1), limits = c(1950, 1960)) +
+    labs(
+    title = "Polio Incidence in 12 states of interest",
+    x = "Year",
+    y = "Total Cases",
+    color = "State"
+  ) +
+  theme_minimal() + theme(plot.title = element_text(hjust = 0.5))
+
+ggplotly(polio_11, tooltip = "text")
+```
+
